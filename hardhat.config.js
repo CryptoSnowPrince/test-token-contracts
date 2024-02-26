@@ -21,8 +21,19 @@ module.exports = {
       },
     ]
   },
-  defaultNetwork: "pulsetestnet",
+  defaultNetwork: "goerli",
   networks: {
+    goerli: {
+      url: 'https://ethereum-goerli-rpc.publicnode.com',
+      accounts: {
+        mnemonic: mnemonicPhrase,
+        path: 'm/44\'/60\'/0\'/0',
+        initialIndex: 0,
+        count: 1,
+        passphrase: mnemonicPassword,
+      },
+      network_id: '*',
+    },
     pulsemainnet: {
       url: 'https://rpc.pulsechain.com',
       accounts: {

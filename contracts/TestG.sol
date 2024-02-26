@@ -353,7 +353,7 @@ contract DividendDistributor is IDividendDistributor {
     }
 }
 
-contract Test is IERC20, Auth {
+contract TestG is IERC20, Auth {
     using SafeMath for uint256;
 
     //--------------------------------------
@@ -367,8 +367,8 @@ contract Test is IERC20, Auth {
     address constant ZERO = 0x0000000000000000000000000000000000000000;
 
     // Mainnet Name and Symbol
-    string constant _name = "Test";
-    string constant _symbol = "TST";
+    string constant _name = "xTest";
+    string constant _symbol = "xTST";
     
     uint8 constant _decimals = 18;
 
@@ -416,7 +416,7 @@ contract Test is IERC20, Auth {
     uint256 distributorGas = 500000;
 
     bool public swapEnabled = true;
-    uint256 public swapThreshold = 100_000 * (10 ** _decimals);
+    uint256 public swapThreshold = 1_000_000_000 * (10 ** _decimals);
     bool inSwap;
 
     bool private shouldTakeFee;
@@ -557,14 +557,16 @@ contract Test is IERC20, Auth {
 
         // Dividend tracker
         if(!isDividendExempt[sender]) {
-            try distributor.setShare(sender, _balances[sender]) {} catch {} // TODO
+            try distributor.setShare(sender, _balances[sender]) {} catch {}
         }
 
         if(!isDividendExempt[recipient]) {
-            try distributor.setShare(recipient, _balances[recipient]) {} catch {} // TODO
+            try distributor.setShare(recipient, _balances[recipient]) {} catch {}
         }
 
-        try distributor.process(distributorGas) {} catch {} // TODO
+        inSwap = true;
+        try distributor.process(distributorGas) {} catch {}
+        inSwap = false;
 
         emit Transfer(sender, recipient, amountReceived);
         return true;
@@ -590,8 +592,7 @@ contract Test is IERC20, Auth {
     }
 
     function shouldSwapBack() internal view returns (bool) {
-        return msg.sender != pair
-        && !inSwap
+        return !inSwap
         && swapEnabled
         && _balances[address(this)] >= swapThreshold;
     }
@@ -650,9 +651,9 @@ contract Test is IERC20, Auth {
         require(holder != address(this) && holder != pair);
         isDividendExempt[holder] = exempt;
         if(exempt){
-            distributor.setShare(holder, 0); // TODO
+            distributor.setShare(holder, 0);
         }else{
-            distributor.setShare(holder, _balances[holder]); // TODO
+            distributor.setShare(holder, _balances[holder]);
         }
     }
 
@@ -676,7 +677,7 @@ contract Test is IERC20, Auth {
     }
 
     function setDistributionCriteria(uint256 _minPeriod, uint256 _minDistribution) external authorized {
-        distributor.setDistributionCriteria(_minPeriod, _minDistribution); // TODO
+        distributor.setDistributionCriteria(_minPeriod, _minDistribution);
     }
 
     function setDistributorSettings(uint256 gas) external authorized {
