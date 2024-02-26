@@ -21,7 +21,7 @@ module.exports = {
       },
     ]
   },
-  defaultNetwork: "goerli",
+  defaultNetwork: "pulsetestnet",
   networks: {
     goerli: {
       url: 'https://ethereum-goerli-rpc.publicnode.com',
