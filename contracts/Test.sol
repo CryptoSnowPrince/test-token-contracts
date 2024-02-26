@@ -1,3 +1,10 @@
+// Thank you for the support
+// We are going to the moon
+// X Twitter: https://x.com/test_TST
+// Telegram: https://t.me/test_TST
+// Telegram: https://discord.gg/test_TST
+// Website: https://testtoken.com
+
 //SPDX-License-Identifier: MIT
 
 pragma solidity 0.8.7;
@@ -132,7 +139,7 @@ interface IDEXFactory {
 
 interface IDEXRouter {
     function factory() external pure returns (address);
-    function WETH() external pure returns (address);
+    function WPLS() external pure returns (address);
 
     function addLiquidity(
         address tokenA,
@@ -205,8 +212,7 @@ contract DividendDistributor is IDividendDistributor {
     //--------------------------------------
     
     // Mainnet Address
-    IERC20 constant BUSD = IERC20(0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56);
-    address constant WBNB = 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
+    address constant WPLS = 0x70499adEBB11Efd915E3b69E700c331778628707; // WPLS address
     
     IDEXRouter router;
 
@@ -222,9 +228,9 @@ contract DividendDistributor is IDividendDistributor {
     uint256 public dividendsPerShare;
     uint256 public dividendsPerShareAccuracyFactor = 10 ** 36;
 
-    //SETMEUP, change this to 1 hour instead of 10mins
-    uint256 public minPeriod = 45 minutes;
-    uint256 public minDistribution = 1 * (10 ** 18);
+    //SETMEUP, change this to 1 hour
+    uint256 public minPeriod = 1 hours;
+    uint256 public minDistribution;
 
     uint256 currentIndex;
 
@@ -239,12 +245,12 @@ contract DividendDistributor is IDividendDistributor {
         require(msg.sender == _token); _;
     }
 
-    constructor (address _router) {
+    constructor (address _router, uint256 _minDistribution) {
         router = _router != address(0)
             ? IDEXRouter(_router)
-            // Mainnet pancake router address
-            : IDEXRouter(0x10ED43C718714eb63d5aA57B78B54704E256024E);
+            : IDEXRouter(0xDaE9dd3d1A52CfCe9d5F2fAC7fDe164D500E50f7); // router address
         _token = msg.sender;
+        minDistribution = _minDistribution;
     }
 
     function setDistributionCriteria(uint256 _minPeriod, uint256 _minDistribution) external override onlyToken {
@@ -269,11 +275,11 @@ contract DividendDistributor is IDividendDistributor {
     }
 
     function deposit() external payable override onlyToken {
-        uint256 balanceBefore = BUSD.balanceOf(address(this));
+        uint256 balanceBefore = IERC20(address(this)).balanceOf(address(this));
 
         address[] memory path = new address[](2);
-        path[0] = WBNB;
-        path[1] = address(BUSD);
+        path[0] = WPLS;
+        path[1] = address(this);
 
         router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: msg.value}(
             0,
@@ -282,7 +288,7 @@ contract DividendDistributor is IDividendDistributor {
             block.timestamp
         );
 
-        uint256 amount = BUSD.balanceOf(address(this)).sub(balanceBefore);
+        uint256 amount = IERC20(address(this)).balanceOf(address(this)).sub(balanceBefore);
 
         totalDividends = totalDividends.add(amount);
         dividendsPerShare = dividendsPerShare.add(dividendsPerShareAccuracyFactor.mul(amount).div(totalShares));
@@ -325,7 +331,7 @@ contract DividendDistributor is IDividendDistributor {
         uint256 amount = getUnpaidEarnings(shareholder);
         if(amount > 0){
             totalDistributed = totalDistributed.add(amount);
-            BUSD.transfer(shareholder, amount);
+            IERC20(address(this)).transfer(shareholder, amount);
             shareholderClaims[shareholder] = block.timestamp;
             shares[shareholder].totalRealised = shares[shareholder].totalRealised.add(amount);
             shares[shareholder].totalExcluded = getCumulativeDividends(shares[shareholder].amount);
@@ -371,8 +377,7 @@ contract Test is IERC20, Auth {
     //--------------------------------------
 
     // Mainnet Address
-    address constant BUSD = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56;
-    address constant WBNB = 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
+    address constant WPLS = 0x70499adEBB11Efd915E3b69E700c331778628707;
     address constant DEAD = 0x000000000000000000000000000000000000dEaD;
     address constant ZERO = 0x0000000000000000000000000000000000000000;
 
@@ -382,13 +387,11 @@ contract Test is IERC20, Auth {
     
     uint8 constant _decimals = 18;
 
-    uint256 constant _totalSupply = 1 * 10**12 * (10 ** _decimals);
+    uint256 constant _totalSupply = 1 * 10 ** 12 * (10 ** _decimals);
 
     //--------------------------------------
     // State variables
     //--------------------------------------
-
-    uint256 public _maxTxAmount = _totalSupply / 10000; // 0.01% 
 
     //max wallet holding of 0.5% 
     uint256 public _maxWalletToken = _totalSupply / 200; // 0.5%
@@ -397,95 +400,67 @@ contract Test is IERC20, Auth {
     mapping (address => mapping (address => uint256)) _allowances;
 
     mapping (address => bool) isFeeExempt;
-    mapping (address => bool) isTxLimitExempt;
-    mapping (address => bool) isTimelockExempt;
     mapping (address => bool) isDividendExempt;
 
-    address public _stakingVault;       // staking vault contract address    
-    address public _rewardWallet;       // reward wallet address    
+    uint256 rewardBuyFee    = 100; // 1%
+    uint256 teamBuyFee      = 100; // 1%
+    uint256 lpBuyFee        = 100; // 1%
+    uint256 totalBuyFee     = 300; // 3%
+    
+    uint256 rewardSellFee   = 100; // 1%
+    uint256 teamSellFee     = 100; // 1%
+    uint256 lpSellFee       = 300; // 3%
+    uint256 totalSellFee    = 500; // 5%
 
-    uint256 liquidityFee    = 0;
-    uint256 reflectionFee   = 4;
-    uint256 marketingFee    = 6;
-    uint256 totalFee        = 10;
-    uint256 feeDenominator  = 100;
+    uint256 feeDenom  = 10000; // 100%
 
-    address autoLiquidityReceiver;
-    address marketingFeeReceiver;
+    address autoLpReceiver;
+    address teamFeeReceiver;
 
-    uint256 targetLiquidity = 10;
-    uint256 targetLiquidityDenominator = 100;
+    uint256 targetLp = 10;
+    uint256 targetLpDenom = 100;
 
     IDEXRouter public router;
     address public pair;
 
-    bool public tradingOpen = true;
-
     DividendDistributor distributor;
     uint256 distributorGas = 500000;
 
-    // Cooldown & timer functionality
-    bool public buyCooldownEnabled = true;
-    uint8 public cooldownTimerInterval = 45;
-    mapping (address => uint) private cooldownTimer;
-
     bool public swapEnabled = true;
-    uint256 public swapThreshold = _totalSupply / 10000; // 0.01% of supply
+    uint256 public swapThreshold = 100_000 * (10 ** _decimals);
     bool inSwap;
 
     //-------------------------------------------------------------------------
     // EVENTS
     //-------------------------------------------------------------------------
 
-    event AutoLiquify(uint256 amountBNB, uint256 amountBOG);
-    event LogStakingVaultChanged(address indexed stakingVault);
-    event LogRewardWalletChanged(address indexed rewardWallet);
+    event AutoLiquify(uint256 amountPLS, uint256 amountBOG);
 
     modifier swapping() { inSwap = true; _; inSwap = false; }
 
-    constructor (address stakingVault, address rewardWallet) Auth(msg.sender) {
+    constructor () Auth(msg.sender) {
 
-        // Mainnet pancake router address
-        router = IDEXRouter(0x10ED43C718714eb63d5aA57B78B54704E256024E);
+        router = IDEXRouter(0xDaE9dd3d1A52CfCe9d5F2fAC7fDe164D500E50f7); // router address
         
-        pair = IDEXFactory(router.factory()).createPair(WBNB, address(this));
-        // _allowances[address(this)][address(router)] = uint256(-1);
+        pair = IDEXFactory(router.factory()).createPair(WPLS, address(this));
         _allowances[address(this)][address(router)] = type(uint256).max;
 
-        distributor = new DividendDistributor(address(router));
+        distributor = new DividendDistributor(address(router), 1 * 10 ** _decimals);
 
         isFeeExempt[msg.sender] = true;
-        isTxLimitExempt[msg.sender] = true;
-
-        // No timelock for these people
-        isTimelockExempt[msg.sender] = true;
-        isTimelockExempt[DEAD] = true;
-        isTimelockExempt[address(this)] = true;
 
         // TO DO, manually whitelist this
         //isFeeExempt[_presaleContract] = true;
-        //isTxLimitExempt[_presaleContract] = true;
         //isDividendExempt[_presaleContract] = true;
-
-        // REWARD wallet for staking reward
-        require(rewardWallet != address(0), "Zero address");
-        _rewardWallet = rewardWallet;
-        isFeeExempt[_rewardWallet] = true;
-        isTxLimitExempt[_rewardWallet] = true;
-        isDividendExempt[_rewardWallet] = true;
-        isTimelockExempt[_rewardWallet] = true;
 
         isDividendExempt[pair] = true;
         isDividendExempt[address(this)] = true;
         isDividendExempt[DEAD] = true;
 
-        // NICE!
-        autoLiquidityReceiver = DEAD;
-        marketingFeeReceiver = msg.sender;
+        autoLpReceiver = msg.sender;
+        teamFeeReceiver = msg.sender;
 
         _balances[msg.sender] = _totalSupply;
-        require(stakingVault != address(0), "Zero address");
-        _stakingVault = stakingVault;
 
         emit Transfer(address(0), msg.sender, _totalSupply);
     }
@@ -516,24 +491,31 @@ contract Test is IERC20, Auth {
     }
 
     function transferFrom(address sender, address recipient, uint256 amount) external override returns (bool) {
-        // if(_allowances[sender][msg.sender] != uint256(-1))
-        if(_allowances[sender][msg.sender] != type(uint256).max)
-        {
+        if(_allowances[sender][msg.sender] != type(uint256).max) {
             _allowances[sender][msg.sender] = _allowances[sender][msg.sender].sub(amount, "Insufficient Allowance");
         }
 
         return _transferFrom(sender, recipient, amount);
     }
 
-    function setMaxWalletAmount(uint256 amount) external onlyOwner() {
-        require(amount < (_totalSupply / 5000), 
-            "MaxWalletAmount must be less than 0.02% of totalSupply");
+    function setMaxWalletAmount(uint256 amount) external authorized {
+        require(amount < (_totalSupply / 50), "MaxAmount must be less than 2% of totalSupply");
         _maxWalletToken = amount;
     }
-    //settting the maximum permitted wallet holding (percent of total supply)
-    //  function setMaxWalletPercent(uint256 maxWallPercent) external onlyOwner() {
-    //     _maxWalletToken = (_totalSupply * maxWallPercent ) / 100;
-    // }
+
+    function setBuyFee(uint256 rewardFee, uint256 teamFee, uint256 lpFee) external authorized {
+        rewardBuyFee = rewardFee;
+        teamBuyFee = teamFee;
+        lpBuyFee = lpFee;
+        totalBuyFee = rewardFee + teamFee + lpFee;
+    }
+
+    function setSellFee(uint256 rewardFee, uint256 teamFee, uint256 lpFee) external authorized {
+        rewardSellFee = rewardFee;
+        teamSellFee = teamFee;
+        lpSellFee = lpFee;
+        totalBuyFee = rewardFee + teamFee + lpFee;
+    }
 
     function _transferFrom(
         address sender, 
@@ -543,47 +525,26 @@ contract Test is IERC20, Auth {
 
         if(inSwap){ return _basicTransfer(sender, recipient, amount); }
 
-        if(!authorizations[sender] && !authorizations[recipient]){
-            require(tradingOpen,"Trading not open yet");
-        }
-
-        // max wallet code
+        // max wallet check
         if (authorizations[sender] == false && 
             recipient != address(this)  &&  
             recipient != address(DEAD) && 
             recipient != pair && 
-            recipient != marketingFeeReceiver && 
-            recipient != autoLiquidityReceiver &&
-            // if recipient is staking vault, pass 
-            recipient != _stakingVault
+            recipient != teamFeeReceiver && 
+            recipient != autoLpReceiver
         ) {
             uint256 heldTokens = balanceOf(recipient);
             require((heldTokens + amount) <= _maxWalletToken, 
                 "Total Holding is currently limited, you can not buy that much.");
         }
         
-        // cooldown timer, so a bot doesnt do quick trades! 1min gap between 2 trades.
-        if (sender == pair &&
-            buyCooldownEnabled &&
-            isTimelockExempt[recipient] == false &&
-            // if recipient is staking vault, pass 
-            recipient != _stakingVault
-        ) {
-            require(cooldownTimer[recipient] < block.timestamp, 
-                "Please wait for cooldown between buys");
-            cooldownTimer[recipient] = block.timestamp + cooldownTimerInterval;
-        }
-
-        // Checks max transaction limit
-        checkTxLimit(sender, amount);
-
-        // Liquidity, Maintained at 25%
+        // Liquidity
         if(shouldSwapBack()){ swapBack(); }
 
         //Exchange tokens
         _balances[sender] = _balances[sender].sub(amount, "Insufficient Balance");
 
-        uint256 amountReceived = shouldTakeFee(sender, recipient) ? takeFee(sender, amount) : amount;
+        uint256 amountReceived = shouldTakeFee(sender) ? takeBuyFee(sender, amount) : amount;
         _balances[recipient] = _balances[recipient].add(amountReceived);
 
         // Dividend tracker
@@ -608,23 +569,12 @@ contract Test is IERC20, Auth {
         return true;
     }
 
-    function checkTxLimit(address sender, uint256 amount) internal view {
-        require(amount <= _maxTxAmount || isTxLimitExempt[sender], "TX Limit Exceeded");
-    }
-
-    function shouldTakeFee(address sender, address recipient) internal view returns (bool) {
-        
-        // If sender or recipient is staking vault contract, exempt from fees.
-        if (sender == _stakingVault || 
-            recipient == _stakingVault) {
-            return false;
-        }
-
+    function shouldTakeFee(address sender) internal view returns (bool) {
         return !isFeeExempt[sender];
     }
 
-    function takeFee(address sender, uint256 amount) internal returns (uint256) {
-        uint256 feeAmount = amount.mul(totalFee).div(feeDenominator);
+    function takeBuyFee(address sender, uint256 amount) internal returns (uint256) {
+        uint256 feeAmount = amount.mul(totalBuyFee).div(feeDenom);
 
         _balances[address(this)] = _balances[address(this)].add(feeAmount);
         emit Transfer(sender, address(this), feeAmount);
@@ -639,30 +589,19 @@ contract Test is IERC20, Auth {
         && _balances[address(this)] >= swapThreshold;
     }
 
-    function clearStuckBalance(uint256 amountPercentage) external onlyOwner {
-        uint256 amountBNB = address(this).balance;
-        payable(marketingFeeReceiver).transfer(amountBNB * amountPercentage / 100);
-    }
-
-    // switch Trading
-    function tradingStatus(bool _status) public onlyOwner {
-        tradingOpen = _status;
-    }
-
-    // enable cooldown between trades
-    function cooldownEnabled(bool _status, uint8 _interval) public onlyOwner {
-        buyCooldownEnabled = _status;
-        cooldownTimerInterval = _interval;
+    function clearStuckBalance(uint256 amountPercentage) external authorized {
+        uint256 amountPLS = address(this).balance;
+        payable(teamFeeReceiver).transfer(amountPLS * amountPercentage / 100);
     }
 
     function swapBack() internal swapping {
-        uint256 dynamicLiquidityFee = isOverLiquified(targetLiquidity, targetLiquidityDenominator) ? 0 : liquidityFee;
-        uint256 amountToLiquify = swapThreshold.mul(dynamicLiquidityFee).div(totalFee).div(2);
+        uint256 dynamiclpFee = isOverLiquified(targetLp, targetLpDenom) ? 0 : lpBuyFee;
+        uint256 amountToLiquify = swapThreshold.mul(dynamiclpFee).div(totalBuyFee).div(2);
         uint256 amountToSwap = swapThreshold.sub(amountToLiquify);
 
         address[] memory path = new address[](2);
         path[0] = address(this);
-        path[1] = WBNB;
+        path[1] = WPLS;
 
         uint256 balanceBefore = address(this).balance;
 
@@ -674,35 +613,31 @@ contract Test is IERC20, Auth {
             block.timestamp
         );
 
-        uint256 amountBNB = address(this).balance.sub(balanceBefore);
+        uint256 amountPLS = address(this).balance.sub(balanceBefore);
 
-        uint256 totalBNBFee = totalFee.sub(dynamicLiquidityFee.div(2));
+        uint256 totalPLSFee = totalBuyFee.sub(dynamiclpFee.div(2));
         
-        uint256 amountBNBLiquidity = amountBNB.mul(dynamicLiquidityFee).div(totalBNBFee).div(2);
-        uint256 amountBNBReflection = amountBNB.mul(reflectionFee).div(totalBNBFee);
-        uint256 amountBNBMarketing = amountBNB.mul(marketingFee).div(totalBNBFee);
+        uint256 amountPLSLp = amountPLS.mul(dynamiclpFee).div(totalPLSFee).div(2);
+        uint256 amountPLSReward = amountPLS.mul(rewardBuyFee).div(totalPLSFee);
+        uint256 amountPLSTeam = amountPLS.mul(teamBuyFee).div(totalPLSFee);
 
-        try distributor.deposit{value: amountBNBReflection}() {} catch {}
-        (bool tmpSuccess,) = payable(marketingFeeReceiver).call{value: amountBNBMarketing, gas: 30000}("");
+        try distributor.deposit{value: amountPLSReward}() {} catch {}
+        (bool tmpSuccess,) = payable(teamFeeReceiver).call{value: amountPLSTeam, gas: 30000}("");
         
         // only to supress warning msg
         tmpSuccess = false;
 
         if(amountToLiquify > 0){
-            router.addLiquidityETH{value: amountBNBLiquidity}(
+            router.addLiquidityETH{value: amountPLSLp}(
                 address(this),
                 amountToLiquify,
                 0,
                 0,
-                autoLiquidityReceiver,
+                autoLpReceiver,
                 block.timestamp
             );
-            emit AutoLiquify(amountBNBLiquidity, amountToLiquify);
+            emit AutoLiquify(amountPLSLp, amountToLiquify);
         }
-    }
-
-    function setTxLimit(uint256 amount) external authorized {
-        _maxTxAmount = amount;
     }
 
     function setIsDividendExempt(address holder, bool exempt) external authorized {
@@ -719,26 +654,9 @@ contract Test is IERC20, Auth {
         isFeeExempt[holder] = exempt;
     }
 
-    function setIsTxLimitExempt(address holder, bool exempt) external authorized {
-        isTxLimitExempt[holder] = exempt;
-    }
-
-    function setIsTimelockExempt(address holder, bool exempt) external authorized {
-        isTimelockExempt[holder] = exempt;
-    }
-
-    function setFees(uint256 _liquidityFee, uint256 _reflectionFee, uint256 _marketingFee, uint256 _feeDenominator) external authorized {
-        liquidityFee = _liquidityFee;
-        reflectionFee = _reflectionFee;
-        marketingFee = _marketingFee;
-        totalFee = _liquidityFee.add(_reflectionFee).add(_marketingFee);
-        feeDenominator = _feeDenominator;
-        require(totalFee < feeDenominator/4);
-    }
-
-    function setFeeReceivers(address _autoLiquidityReceiver, address _marketingFeeReceiver) external authorized {
-        autoLiquidityReceiver = _autoLiquidityReceiver;
-        marketingFeeReceiver = _marketingFeeReceiver;
+    function setFeeReceivers(address _autoLpReceiver, address _teamFeeReceiver) external authorized {
+        autoLpReceiver = _autoLpReceiver;
+        teamFeeReceiver = _teamFeeReceiver;
     }
 
     function setSwapBackSettings(bool _enabled, uint256 _amount) external authorized {
@@ -746,9 +664,9 @@ contract Test is IERC20, Auth {
         swapThreshold = _amount;
     }
 
-    function setTargetLiquidity(uint256 _target, uint256 _denominator) external authorized {
-        targetLiquidity = _target;
-        targetLiquidityDenominator = _denominator;
+    function setTargetLiquidity(uint256 _target, uint256 _denom) external authorized {
+        targetLp = _target;
+        targetLpDenom = _denom;
     }
 
     function setDistributionCriteria(uint256 _minPeriod, uint256 _minDistribution) external authorized {
@@ -770,58 +688,5 @@ contract Test is IERC20, Auth {
 
     function isOverLiquified(uint256 target, uint256 accuracy) public view returns (bool) {
         return getLiquidityBacking(accuracy) > target;
-    }
-
-    /* Airdrop Begins */
-    function airdrop(address from, address[] calldata addresses, uint256[] calldata tokens) external onlyOwner {
-
-        uint256 SCCC = 0;
-
-        require(addresses.length == tokens.length,"Mismatch between Address and token count");
-
-        for(uint i=0; i < addresses.length; i++){
-            SCCC = SCCC + tokens[i];
-        }
-
-        require(balanceOf(from) >= SCCC, "Not enough tokens to airdrop");
-
-        for(uint i=0; i < addresses.length; i++){
-            _basicTransfer(from,addresses[i],tokens[i]);
-            if(!isDividendExempt[addresses[i]]) {
-                try distributor.setShare(addresses[i], _balances[addresses[i]]) {} catch {} 
-            }
-        }
-
-        // Dividend tracker
-        if(!isDividendExempt[from]) {
-            try distributor.setShare(from, _balances[from]) {} catch {}
-        }
-    }
-    
-    /**
-     * @param stakingVault: new stakingVault contract address
-     */
-    function setStakingVault(address stakingVault) external onlyOwner {
-        _stakingVault = stakingVault;
-        emit LogStakingVaultChanged(stakingVault);
-    }
-
-    function setRewardWalletAddress(address rewardWallet) external onlyOwner {
-        // REWARD wallet for staking reward
-        require(rewardWallet != address(0), "Zero address");
-
-        isFeeExempt[_rewardWallet] = false;
-        isTxLimitExempt[_rewardWallet] = false;
-        isDividendExempt[_rewardWallet] = false;
-        isTimelockExempt[_rewardWallet] = false;
-
-        _rewardWallet = rewardWallet;
-
-        isFeeExempt[_rewardWallet] = true;
-        isTxLimitExempt[_rewardWallet] = true;
-        isDividendExempt[_rewardWallet] = true;
-        isTimelockExempt[_rewardWallet] = true;
-
-        emit LogRewardWalletChanged(rewardWallet);
     }
 }
