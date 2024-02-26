@@ -592,7 +592,8 @@ contract TestG is IERC20, Auth {
     }
 
     function shouldSwapBack() internal view returns (bool) {
-        return !inSwap
+        return msg.sender != pair
+        && !inSwap
         && swapEnabled
         && _balances[address(this)] >= swapThreshold;
     }
