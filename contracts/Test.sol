@@ -190,12 +190,14 @@ interface IDividendDistributor {
     function setShare(address shareholder, uint256 amount) external;
     function deposit(uint256 amount) external;
     function process(uint256 gas) external;
+    function setMinAmount(uint256 _minAmount) external;
 }
 
 contract DividendDistributor is IDividendDistributor {
     using SafeMath for uint256;
 
-    address _token;
+    address public _token;
+    uint256 public MIN_AMOUNT;
 
     //--------------------------------------
     // Data structure
@@ -239,9 +241,10 @@ contract DividendDistributor is IDividendDistributor {
         require(msg.sender == _token); _;
     }
 
-    constructor (uint256 _minDistribution) {
+    constructor (uint256 _minDistribution, uint256 _minAmount) {
         _token = msg.sender;
         minDistribution = _minDistribution;
+        MIN_AMOUNT = _minAmount;
     }
 
     function setDistributionCriteria(uint256 _minPeriod, uint256 _minDistribution) external override onlyToken {
@@ -306,7 +309,7 @@ contract DividendDistributor is IDividendDistributor {
         if(shares[shareholder].amount == 0){ return; }
 
         uint256 amount = getUnpaidEarnings(shareholder);
-        if(amount > 0){
+        if(amount > 0 && IERC20(_token).balanceOf(shareholder) > MIN_AMOUNT){
             totalDistributed = totalDistributed.add(amount);
             IERC20(_token).transfer(shareholder, amount);
             shareholderClaims[shareholder] = block.timestamp;
@@ -343,6 +346,10 @@ contract DividendDistributor is IDividendDistributor {
         shareholders[shareholderIndexes[shareholder]] = shareholders[shareholders.length-1];
         shareholderIndexes[shareholders[shareholders.length-1]] = shareholderIndexes[shareholder];
         shareholders.pop();
+    }
+
+    function setMinAmount(uint256 _minAmount) external override onlyToken {
+        MIN_AMOUNT = _minAmount;
     }
 }
 
@@ -430,7 +437,7 @@ contract Test is IERC20, Auth {
         pair = IDEXFactory(router.factory()).createPair(WPLS, address(this));
         _allowances[address(this)][address(router)] = type(uint256).max;
 
-        distributor = new DividendDistributor(1 * 10 ** _decimals);
+        distributor = new DividendDistributor(1 * 10 ** _decimals, 10 ** 8 * (10 ** _decimals));
         _allowances[address(this)][address(distributor)] = type(uint256).max;
 
         isDividendExempt[pair] = true;
@@ -660,6 +667,10 @@ contract Test is IERC20, Auth {
     function setTargetLiquidity(uint256 _target, uint256 _denom) external authorized {
         targetLp = _target;
         targetLpDenom = _denom;
+    }
+
+    function setMinAmount(uint256 _minAmount) external authorized {
+        distributor.setMinAmount(_minAmount);
     }
 
     function setDistributionCriteria(uint256 _minPeriod, uint256 _minDistribution) external authorized {

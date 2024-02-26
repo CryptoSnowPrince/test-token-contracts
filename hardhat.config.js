@@ -74,7 +74,7 @@ module.exports = {
         network: "pulsetestnet",
         chainId: 943,
         urls: {
-          apiURL: "https://scan.v4.testnet.pulsechain.com/api",
+          apiURL: "https://api.scan.v4.testnet.pulsechain.com/api",
           browserURL: "https://scan.v4.testnet.pulsechain.com"
         }
       },
