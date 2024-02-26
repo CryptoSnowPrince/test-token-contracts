@@ -188,7 +188,7 @@ interface IDEXRouter {
 interface IDividendDistributor {
     function setDistributionCriteria(uint256 _minPeriod, uint256 _minDistribution) external;
     function setShare(address shareholder, uint256 amount) external;
-    function deposit() external payable;
+    function deposit(uint256 amount) external;
     function process(uint256 gas) external;
 }
 
@@ -210,12 +210,6 @@ contract DividendDistributor is IDividendDistributor {
     //--------------------------------------
     // State variables
     //--------------------------------------
-    
-    // Mainnet Address
-    address constant WPLS = 0x70499adEBB11Efd915E3b69E700c331778628707; // WPLS address
-    
-    IDEXRouter router;
-
     address[] shareholders;
     mapping (address => uint256) shareholderIndexes;
     mapping (address => uint256) shareholderClaims;
@@ -245,10 +239,7 @@ contract DividendDistributor is IDividendDistributor {
         require(msg.sender == _token); _;
     }
 
-    constructor (address _router, uint256 _minDistribution) {
-        router = _router != address(0)
-            ? IDEXRouter(_router)
-            : IDEXRouter(0xDaE9dd3d1A52CfCe9d5F2fAC7fDe164D500E50f7); // router address
+    constructor (uint256 _minDistribution) {
         _token = msg.sender;
         minDistribution = _minDistribution;
     }
@@ -274,22 +265,8 @@ contract DividendDistributor is IDividendDistributor {
         shares[shareholder].totalExcluded = getCumulativeDividends(shares[shareholder].amount);
     }
 
-    function deposit() external payable override onlyToken {
-        uint256 balanceBefore = IERC20(address(this)).balanceOf(address(this));
-
-        address[] memory path = new address[](2);
-        path[0] = WPLS;
-        path[1] = address(this);
-
-        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: msg.value}(
-            0,
-            path,
-            address(this),
-            block.timestamp
-        );
-
-        uint256 amount = IERC20(address(this)).balanceOf(address(this)).sub(balanceBefore);
-
+    function deposit(uint256 amount) external override onlyToken {
+        require(IERC20(_token).transferFrom(_token, address(this), amount), "deposit err");
         totalDividends = totalDividends.add(amount);
         dividendsPerShare = dividendsPerShare.add(dividendsPerShareAccuracyFactor.mul(amount).div(totalShares));
     }
@@ -331,7 +308,7 @@ contract DividendDistributor is IDividendDistributor {
         uint256 amount = getUnpaidEarnings(shareholder);
         if(amount > 0){
             totalDistributed = totalDistributed.add(amount);
-            IERC20(address(this)).transfer(shareholder, amount);
+            IERC20(_token).transfer(shareholder, amount);
             shareholderClaims[shareholder] = block.timestamp;
             shares[shareholder].totalRealised = shares[shareholder].totalRealised.add(amount);
             shares[shareholder].totalExcluded = getCumulativeDividends(shares[shareholder].amount);
@@ -399,7 +376,6 @@ contract Test is IERC20, Auth {
     mapping (address => uint256) _balances;
     mapping (address => mapping (address => uint256)) _allowances;
 
-    mapping (address => bool) isFeeExempt;
     mapping (address => bool) isDividendExempt;
 
     uint256 rewardBuyFee    = 100; // 1%
@@ -411,6 +387,11 @@ contract Test is IERC20, Auth {
     uint256 teamSellFee     = 100; // 1%
     uint256 lpSellFee       = 300; // 3%
     uint256 totalSellFee    = 500; // 5%
+
+    uint256 rewardFee;  // apply fee
+    uint256 teamFee;    // apply fee
+    uint256 lpFee;      // apply fee
+    uint256 totalFee;   // apply fee
 
     uint256 feeDenom  = 10000; // 100%
 
@@ -430,6 +411,10 @@ contract Test is IERC20, Auth {
     uint256 public swapThreshold = 100_000 * (10 ** _decimals);
     bool inSwap;
 
+    bool private shouldTakeFee;
+    uint256 private lpAmount;
+    uint256 private teamAmount;
+
     //-------------------------------------------------------------------------
     // EVENTS
     //-------------------------------------------------------------------------
@@ -445,13 +430,8 @@ contract Test is IERC20, Auth {
         pair = IDEXFactory(router.factory()).createPair(WPLS, address(this));
         _allowances[address(this)][address(router)] = type(uint256).max;
 
-        distributor = new DividendDistributor(address(router), 1 * 10 ** _decimals);
-
-        isFeeExempt[msg.sender] = true;
-
-        // TO DO, manually whitelist this
-        //isFeeExempt[_presaleContract] = true;
-        //isDividendExempt[_presaleContract] = true;
+        distributor = new DividendDistributor(1 * 10 ** _decimals);
+        _allowances[address(this)][address(distributor)] = type(uint256).max;
 
         isDividendExempt[pair] = true;
         isDividendExempt[address(this)] = true;
@@ -482,7 +462,6 @@ contract Test is IERC20, Auth {
     }
 
     function approveMax(address spender) external returns (bool) {
-        // return approve(spender, uint256(-1));
         return approve(spender, type(uint256).max);
     }
 
@@ -503,18 +482,18 @@ contract Test is IERC20, Auth {
         _maxWalletToken = amount;
     }
 
-    function setBuyFee(uint256 rewardFee, uint256 teamFee, uint256 lpFee) external authorized {
-        rewardBuyFee = rewardFee;
-        teamBuyFee = teamFee;
-        lpBuyFee = lpFee;
-        totalBuyFee = rewardFee + teamFee + lpFee;
+    function setBuyFee(uint256 _rewardFee, uint256 _teamFee, uint256 _lpFee) external authorized {
+        rewardBuyFee = _rewardFee;
+        teamBuyFee = _teamFee;
+        lpBuyFee = _lpFee;
+        totalBuyFee = _rewardFee + _teamFee + _lpFee;
     }
 
-    function setSellFee(uint256 rewardFee, uint256 teamFee, uint256 lpFee) external authorized {
-        rewardSellFee = rewardFee;
-        teamSellFee = teamFee;
-        lpSellFee = lpFee;
-        totalBuyFee = rewardFee + teamFee + lpFee;
+    function setSellFee(uint256 _rewardFee, uint256 _teamFee, uint256 _lpFee) external authorized {
+        rewardSellFee = _rewardFee;
+        teamSellFee = _teamFee;
+        lpSellFee = _lpFee;
+        totalSellFee = _rewardFee + _teamFee + _lpFee;
     }
 
     function _transferFrom(
@@ -537,6 +516,26 @@ contract Test is IERC20, Auth {
             require((heldTokens + amount) <= _maxWalletToken, 
                 "Total Holding is currently limited, you can not buy that much.");
         }
+
+        if (sender == pair) {
+            rewardFee = rewardBuyFee;
+            teamFee = teamBuyFee;
+            lpFee = lpBuyFee;
+            totalFee = totalBuyFee;
+            shouldTakeFee = true;
+        } else if (recipient == pair) {
+            rewardFee = rewardSellFee;
+            teamFee = teamSellFee;
+            lpFee = lpSellFee;
+            totalFee = totalSellFee;
+            shouldTakeFee = true;
+        } else {
+            rewardFee = 0;
+            teamFee = 0;
+            lpFee = 0;
+            totalFee = 0;
+            shouldTakeFee = false;
+        }
         
         // Liquidity
         if(shouldSwapBack()){ swapBack(); }
@@ -544,19 +543,19 @@ contract Test is IERC20, Auth {
         //Exchange tokens
         _balances[sender] = _balances[sender].sub(amount, "Insufficient Balance");
 
-        uint256 amountReceived = shouldTakeFee(sender) ? takeBuyFee(sender, amount) : amount;
+        uint256 amountReceived = shouldTakeFee ? takeFee(sender, amount) : amount;
         _balances[recipient] = _balances[recipient].add(amountReceived);
 
         // Dividend tracker
         if(!isDividendExempt[sender]) {
-            try distributor.setShare(sender, _balances[sender]) {} catch {}
+            try distributor.setShare(sender, _balances[sender]) {} catch {} // TODO
         }
 
         if(!isDividendExempt[recipient]) {
-            try distributor.setShare(recipient, _balances[recipient]) {} catch {} 
+            try distributor.setShare(recipient, _balances[recipient]) {} catch {} // TODO
         }
 
-        try distributor.process(distributorGas) {} catch {}
+        try distributor.process(distributorGas) {} catch {} // TODO
 
         emit Transfer(sender, recipient, amountReceived);
         return true;
@@ -569,14 +568,13 @@ contract Test is IERC20, Auth {
         return true;
     }
 
-    function shouldTakeFee(address sender) internal view returns (bool) {
-        return !isFeeExempt[sender];
-    }
+    function takeFee(address sender, uint256 amount) internal returns (uint256) {
+        uint256 feeAmount = amount.mul(totalFee).div(feeDenom);
 
-    function takeBuyFee(address sender, uint256 amount) internal returns (uint256) {
-        uint256 feeAmount = amount.mul(totalBuyFee).div(feeDenom);
-
+        lpAmount = lpAmount.add(feeAmount.mul(lpFee).div(totalFee));
+        teamAmount = teamAmount.add(feeAmount.mul(teamFee).div(totalFee));
         _balances[address(this)] = _balances[address(this)].add(feeAmount);
+
         emit Transfer(sender, address(this), feeAmount);
 
         return amount.sub(feeAmount);
@@ -595,9 +593,9 @@ contract Test is IERC20, Auth {
     }
 
     function swapBack() internal swapping {
-        uint256 dynamiclpFee = isOverLiquified(targetLp, targetLpDenom) ? 0 : lpBuyFee;
-        uint256 amountToLiquify = swapThreshold.mul(dynamiclpFee).div(totalBuyFee).div(2);
-        uint256 amountToSwap = swapThreshold.sub(amountToLiquify);
+        uint256 feeAmount = _balances[address(this)];
+        uint256 amountToLiquify = lpAmount.div(2);
+        uint256 amountToSwap = teamAmount + lpAmount - amountToLiquify;
 
         address[] memory path = new address[](2);
         path[0] = address(this);
@@ -615,13 +613,12 @@ contract Test is IERC20, Auth {
 
         uint256 amountPLS = address(this).balance.sub(balanceBefore);
 
-        uint256 totalPLSFee = totalBuyFee.sub(dynamiclpFee.div(2));
-        
-        uint256 amountPLSLp = amountPLS.mul(dynamiclpFee).div(totalPLSFee).div(2);
-        uint256 amountPLSReward = amountPLS.mul(rewardBuyFee).div(totalPLSFee);
-        uint256 amountPLSTeam = amountPLS.mul(teamBuyFee).div(totalPLSFee);
+        uint256 amountPLSLp = amountPLS.mul(lpAmount - amountToLiquify).div(amountToSwap);
+        uint256 amountPLSTeam = amountPLS.sub(amountPLSLp);
 
-        try distributor.deposit{value: amountPLSReward}() {} catch {}
+        try distributor.deposit(feeAmount.sub(lpAmount).sub(teamAmount)) {} catch {}
+        lpAmount = 0;
+        teamAmount = 0;
         (bool tmpSuccess,) = payable(teamFeeReceiver).call{value: amountPLSTeam, gas: 30000}("");
         
         // only to supress warning msg
@@ -644,14 +641,10 @@ contract Test is IERC20, Auth {
         require(holder != address(this) && holder != pair);
         isDividendExempt[holder] = exempt;
         if(exempt){
-            distributor.setShare(holder, 0);
+            distributor.setShare(holder, 0); // TODO
         }else{
-            distributor.setShare(holder, _balances[holder]);
+            distributor.setShare(holder, _balances[holder]); // TODO
         }
-    }
-
-    function setIsFeeExempt(address holder, bool exempt) external authorized {
-        isFeeExempt[holder] = exempt;
     }
 
     function setFeeReceivers(address _autoLpReceiver, address _teamFeeReceiver) external authorized {
@@ -670,23 +663,11 @@ contract Test is IERC20, Auth {
     }
 
     function setDistributionCriteria(uint256 _minPeriod, uint256 _minDistribution) external authorized {
-        distributor.setDistributionCriteria(_minPeriod, _minDistribution);
+        distributor.setDistributionCriteria(_minPeriod, _minDistribution); // TODO
     }
 
     function setDistributorSettings(uint256 gas) external authorized {
         require(gas < 750000);
         distributorGas = gas;
-    }
-    
-    function getCirculatingSupply() public view returns (uint256) {
-        return _totalSupply.sub(balanceOf(DEAD)).sub(balanceOf(ZERO));
-    }
-
-    function getLiquidityBacking(uint256 accuracy) public view returns (uint256) {
-        return accuracy.mul(balanceOf(pair).mul(2)).div(getCirculatingSupply());
-    }
-
-    function isOverLiquified(uint256 target, uint256 accuracy) public view returns (bool) {
-        return getLiquidityBacking(accuracy) > target;
     }
 }
